@@ -48,6 +48,7 @@ class ScreenRecorderService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var mediaRecorder: MediaRecorder? = null
     private var virtualDisplay: VirtualDisplay? = null
+    private var persistentSurface: android.view.Surface? = null
     private var handler: Handler? = null
     private var isRecording = false
     private var chunkIndex = 0
@@ -61,15 +62,6 @@ class ScreenRecorderService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
         handler = Handler(Looper.getMainLooper())
     }
 
@@ -80,6 +72,18 @@ class ScreenRecorderService : Service() {
     }
 
     // ─── Public API ─────────────────────────────────────────────
+
+    fun promoteToForeground() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID, notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
 
     fun startRecording(projection: MediaProjection, activity: Activity) {
         mediaProjection = projection
@@ -103,14 +107,91 @@ class ScreenRecorderService : Service() {
         }
 
         isRecording = true
-        startNewChunk()
+        
+        isRecording = true
+        
+        // Setup persistent surface for VirtualDisplay on Android M+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                persistentSurface = MediaCodec.createPersistentInputSurface()
+                android.util.Log.d("FastIssueExport", "Created persistent input surface")
+                
+                // 1. Prepare first recorder (gets it ready to consume frames)
+                prepareFirstRecorder()
+
+                // 2. Register callback
+                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        super.onStop()
+                        android.util.Log.d("FastIssueExport", "MediaProjection stopped by system")
+                        stopRecording()
+                    }
+                }, handler)
+
+                // 3. Create virtual display (starts feeding frames to persistentSurface)
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "FastIssueExport",
+                    screenWidth, screenHeight, screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    persistentSurface, null, handler
+                )
+                android.util.Log.d("FastIssueExport", "Created virtual display: ${screenWidth}x${screenHeight}")
+                
+                // 4. Start recording
+                mediaRecorder?.start()
+                android.util.Log.d("FastIssueExport", "Started first recording chunk")
+            } catch (e: Exception) {
+                android.util.Log.e("FastIssueExport", "Failed to init recording: ${e.message}", e)
+                isRecording = false
+                return
+            }
+        } else {
+            // Fallback for older devices
+            startNewChunk()
+        }
+
         scheduleChunkRotation()
+    }
+
+    private fun prepareFirstRecorder() {
+        val chunkFile = File(cacheDir, "chunk_0.mp4")
+        chunkFiles.add(chunkFile)
+        chunkIndex = 1
+
+        mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            MediaRecorder(this)
+        } else {
+            @Suppress("DEPRECATION")
+            MediaRecorder()
+        }
+
+        mediaRecorder?.apply {
+            setVideoSource(MediaRecorder.VideoSource.SURFACE)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            setVideoSize(screenWidth, screenHeight)
+            setVideoFrameRate(VIDEO_FRAME_RATE)
+            setVideoEncodingBitRate(VIDEO_BIT_RATE)
+            setOutputFile(chunkFile.absolutePath)
+            if (persistentSurface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                setInputSurface(persistentSurface!!)
+            }
+            prepare()
+        }
     }
 
     fun stopRecording() {
         isRecording = false
         handler?.removeCallbacksAndMessages(null)
         stopCurrentRecorder()
+        
+        // Full cleanup for persistent session
+        virtualDisplay?.release()
+        virtualDisplay = null
+        persistentSurface?.release()
+        persistentSurface = null
+        mediaProjection?.stop()
+        mediaProjection = null
     }
 
     /**
@@ -142,6 +223,7 @@ class ScreenRecorderService : Service() {
     private fun startNewChunk() {
         val chunkFile = File(cacheDir, "chunk_${chunkIndex}.mp4")
         chunkIndex++
+        android.util.Log.d("FastIssueExport", "Starting new chunk: ${chunkFile.name}")
 
         try {
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -159,19 +241,22 @@ class ScreenRecorderService : Service() {
                 setVideoFrameRate(VIDEO_FRAME_RATE)
                 setVideoEncodingBitRate(VIDEO_BIT_RATE)
                 setOutputFile(chunkFile.absolutePath)
+                if (persistentSurface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    setInputSurface(persistentSurface!!)
+                }
                 prepare()
             }
 
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "FastIssueExport",
-                screenWidth, screenHeight, screenDensity,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                mediaRecorder?.surface, null, handler
-            )
+            if (persistentSurface == null) {
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "FastIssueExport",
+                    screenWidth, screenHeight, screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    mediaRecorder?.surface, null, handler
+                )
+            }
 
             mediaRecorder?.start()
-
-            // Track chunk files
             chunkFiles.add(chunkFile)
 
             // Purge old chunks beyond MAX_CHUNKS
@@ -187,15 +272,18 @@ class ScreenRecorderService : Service() {
     private fun stopCurrentRecorder() {
         try {
             mediaRecorder?.stop()
-        } catch (_: Exception) {
-            // Might throw if very short duration
+            android.util.Log.d("FastIssueExport", "Stopped current recorder")
+        } catch (e: Exception) {
+            android.util.Log.w("FastIssueExport", "Failed to stop recorder: ${e.message}")
         }
         try {
             mediaRecorder?.release()
         } catch (_: Exception) {}
         mediaRecorder = null
-        virtualDisplay?.release()
-        virtualDisplay = null
+        if (persistentSurface == null) {
+            virtualDisplay?.release()
+            virtualDisplay = null
+        }
     }
 
     private fun scheduleChunkRotation() {
@@ -239,7 +327,11 @@ class ScreenRecorderService : Service() {
         val bufferInfo = MediaCodec.BufferInfo()
 
         for (chunk in chunks) {
-            if (!chunk.exists() || chunk.length() == 0L) continue
+            if (!chunk.exists() || chunk.length() == 0L) {
+                android.util.Log.w("FastIssueExport", "Skipping empty/missing chunk: ${chunk.name}")
+                continue
+            }
+            android.util.Log.d("FastIssueExport", "Concatenating chunk: ${chunk.name} (${chunk.length()} bytes)")
 
             val extractor = MediaExtractor()
             try {

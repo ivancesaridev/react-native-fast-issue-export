@@ -63,6 +63,7 @@ interface FastIssueExportNative {
     getDeviceInfo(): Promise<DeviceInfo>;
     enableShakeDetection(): void;
     disableShakeDetection(): void;
+    shareFile(filePath: string): Promise<void>;
 }
 
 const NativeModule: FastIssueExportNative = NativeModules.FastIssueExport;
@@ -150,6 +151,20 @@ export async function exportBugReport(): Promise<string> {
  */
 export async function teardown(): Promise<void> {
     await stopBuffering();
+}
+
+/**
+ * Share a file (e.g. a bug report ZIP) using the native share sheet.
+ * On Android uses FileProvider + Intent.ACTION_SEND.
+ * On iOS uses the standard Share API.
+ */
+export async function shareReport(filePath: string): Promise<void> {
+    if (Platform.OS === 'android') {
+        return NativeModule.shareFile(filePath);
+    }
+    // iOS: React Native's Share API supports file URLs
+    const { Share } = require('react-native');
+    await Share.share({ url: filePath, title: 'Bug Report' });
 }
 
 // ─── Internal ───────────────────────────────────────────────────

@@ -61,18 +61,14 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
         // Start and bind to the foreground service
         val serviceIntent = Intent(context, ScreenRecorderService::class.java)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
+        context.startService(serviceIntent)
 
         pendingStartPromise = promise
         context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     private fun requestMediaProjection(promise: Promise) {
-        val activity = currentActivity
+        val activity = reactApplicationContext.currentActivity
         if (activity == null) {
             promise.reject("ERR_NO_ACTIVITY", "No current activity available.")
             return
@@ -85,7 +81,7 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
 
         val listener = object : BaseActivityEventListener() {
             override fun onActivityResult(
-                activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?
+                activity: Activity, requestCode: Int, resultCode: Int, data: Intent?
             ) {
                 if (requestCode != MEDIA_PROJECTION_REQUEST_CODE) return
                 reactApplicationContext.removeActivityEventListener(this)
@@ -95,7 +91,9 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
                     return
                 }
 
-                val mediaProjection = (activity?.getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                screenRecorderService?.promoteToForeground()
+
+                val mediaProjection = (activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE)
                         as? MediaProjectionManager)?.getMediaProjection(resultCode, data)
 
                 if (mediaProjection == null) {
@@ -103,7 +101,7 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
                     return
                 }
 
-                screenRecorderService?.startRecording(mediaProjection, activity!!)
+                screenRecorderService?.startRecording(mediaProjection, activity)
                 promise.resolve(null)
             }
         }
@@ -222,7 +220,55 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
         // No-op
     }
 
+    // ─── Share File ────────────────────────────────────────────
+
+    @ReactMethod
+    fun shareFile(filePath: String, promise: Promise) {
+        try {
+            val context = reactApplicationContext
+            val file = java.io.File(filePath)
+
+            if (!file.exists()) {
+                promise.reject("ERR_FILE_NOT_FOUND", "File not found: $filePath")
+                return
+            }
+
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fastissueexport.fileprovider",
+                file
+            )
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "Bug Report")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            val chooser = Intent.createChooser(shareIntent, "Share Bug Report").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            context.startActivity(chooser)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("ERR_SHARE", e.message, e)
+        }
+    }
+
     // ─── Event Helpers ──────────────────────────────────────────
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for NativeEventEmitter
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for NativeEventEmitter
+    }
 
     private fun sendEvent(eventName: String, params: WritableMap?) {
         reactApplicationContext

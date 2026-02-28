@@ -1,111 +1,195 @@
 /**
- * Example: How to integrate fast-issue-export into your React Native app.
+ * FastIssueExport — Sample App
  *
- * This file demonstrates the initialization and basic usage of the plugin.
+ * Demonstrates initializing the plugin and triggering a bug report via shake.
  */
 
-import React, { useEffect } from 'react';
-import { StyleSheet, View, Text, Alert, Share, Platform } from 'react-native';
-import { initialize, teardown } from 'fast-issue-export';
+import React, { useEffect, useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Alert,
+  TouchableOpacity,
+  StatusBar,
+} from 'react-native';
+import { initialize, teardown, exportBugReport, shareReport } from 'fast-issue-export';
 
 // Simulated app state — in a real app, pull from Redux/Zustand/Context/etc.
 const getAppState = async () => {
-    return {
-        userId: 'user_abc123',
-        currentScreen: 'HomeScreen',
-        featureFlags: {
-            darkMode: true,
-            betaFeatures: false,
-        },
-        // Add any other diagnostic data you need
-        timestamp: new Date().toISOString(),
-    };
+  return {
+    userId: 'user_abc123',
+    currentScreen: 'HomeScreen',
+    featureFlags: {
+      darkMode: true,
+      betaFeatures: false,
+    },
+    timestamp: new Date().toISOString(),
+  };
 };
 
 export default function App() {
-    useEffect(() => {
-        // Initialize the bug reporter on app start
-        initialize({
-            // This callback is invoked every time the user shakes the device.
-            // Return whatever JSON you want included in the bug report.
-            getAppState,
+  const [status, setStatus] = useState<string>('Initializing…');
 
-            // Called when the .zip is ready — open a share sheet
-            onBugReportReady: (zipPath) => {
-                Alert.alert(
-                    'Bug Report Ready',
-                    'A bug report has been generated. Would you like to share it?',
-                    [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                            text: 'Share',
-                            onPress: () => {
-                                Share.share({
-                                    url: Platform.OS === 'ios' ? zipPath : `file://${zipPath}`,
-                                    title: 'Bug Report',
-                                });
-                            },
-                        },
-                    ],
+  useEffect(() => {
+    initialize({
+      getAppState,
+
+      onBugReportReady: (zipPath) => {
+        setStatus('✅ Report ready!');
+        Alert.alert(
+          'Bug Report Ready',
+          'A bug report has been generated. Would you like to share it?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Share',
+              onPress: () => {
+                shareReport(zipPath).catch((err) =>
+                  Alert.alert('Share Error', err.message)
                 );
+              },
             },
+          ],
+        );
+      },
 
-            // Handle errors gracefully
-            onError: (error) => {
-                console.error('[BugReporter] Export failed:', error.message);
-                Alert.alert('Error', `Bug report export failed: ${error.message}`);
-            },
+      onError: (error) => {
+        console.error('[BugReporter] Export failed:', error.message);
+        setStatus(`❌ Error: ${error.message}`);
+        Alert.alert('Error', `Bug report export failed: ${error.message}`);
+      },
 
-            // Start buffering immediately (default: true)
-            autoStart: true,
-        });
+      autoStart: true,
+    })
+      .then(() => setStatus('🟢 Buffering active — shake to report'))
+      .catch((err) => setStatus(`❌ Init failed: ${err.message}`));
 
-        // Cleanup on unmount
-        return () => {
-            teardown();
-        };
-    }, []);
+    return () => {
+      teardown();
+    };
+  }, []);
 
-    return (
-        <View style={styles.container}>
-            <Text style={styles.title}>My App</Text>
-            <Text style={styles.subtitle}>
-                Shake the device to generate a bug report 🐛
-            </Text>
-            <Text style={styles.info}>
-                The report includes:{'\n'}
-                • Last 30 seconds of screen recording{'\n'}
-                • Device information{'\n'}
-                • Custom app state snapshot
-            </Text>
-        </View>
-    );
+  const handleManualExport = async () => {
+    try {
+      setStatus('⏳ Exporting…');
+      const zipPath = await exportBugReport();
+      setStatus('✅ Export complete!');
+      Alert.alert('Bug Report', `Saved to:\n${zipPath}`);
+    } catch (err: any) {
+      setStatus(`❌ Export error: ${err.message}`);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+
+      <Text style={styles.emoji}>🐛</Text>
+      <Text style={styles.title}>FastIssueExport</Text>
+      <Text style={styles.subtitle}>Sample App</Text>
+
+      <View style={styles.statusBox}>
+        <Text style={styles.statusLabel}>Status</Text>
+        <Text style={styles.statusText}>{status}</Text>
+      </View>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>The report includes:</Text>
+        <Text style={styles.infoItem}>📹 Last 30s of screen recording</Text>
+        <Text style={styles.infoItem}>📱 Device information</Text>
+        <Text style={styles.infoItem}>📦 Custom app state snapshot</Text>
+      </View>
+
+      <TouchableOpacity style={styles.button} onPress={handleManualExport}>
+        <Text style={styles.buttonText}>Export Bug Report Manually</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.hint}>
+        Or shake the device to trigger automatically
+      </Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#1a1a2e',
-        padding: 24,
-    },
-    title: {
-        fontSize: 28,
-        fontWeight: '700',
-        color: '#e94560',
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 16,
-        color: '#eaeaea',
-        marginBottom: 24,
-        textAlign: 'center',
-    },
-    info: {
-        fontSize: 14,
-        color: '#a0a0b0',
-        lineHeight: 22,
-        textAlign: 'left',
-    },
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0f0f1a',
+    padding: 24,
+  },
+  emoji: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#e94560',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 32,
+  },
+  statusBox: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+  },
+  statusLabel: {
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+    letterSpacing: 1,
+  },
+  statusText: {
+    fontSize: 15,
+    color: '#eaeaea',
+  },
+  infoBox: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ccc',
+    marginBottom: 10,
+  },
+  infoItem: {
+    fontSize: 14,
+    color: '#a0a0b0',
+    lineHeight: 24,
+  },
+  button: {
+    backgroundColor: '#e94560',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 10,
+    marginBottom: 16,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  hint: {
+    fontSize: 13,
+    color: '#555',
+    fontStyle: 'italic',
+  },
 });
