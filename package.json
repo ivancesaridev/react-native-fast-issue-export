@@ -1,0 +1,43 @@
+{
+  "name": "fast-issue-export",
+  "version": "0.1.0",
+  "description": "React Native QA bug reporter: continuous screen recording buffer + shake-to-export ZIP with video, device info, and custom app state.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typescript": "tsc --noEmit",
+    "test": "jest"
+  },
+  "keywords": [
+    "react-native",
+    "bug-report",
+    "screen-recording",
+    "qa",
+    "shake",
+    "issue-export"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.72.0",
+    "react-native-fs": ">=2.20.0",
+    "react-native-zip-archive": ">=6.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.0",
+    "react": "^18.2.0",
+    "react-native": "^0.76.0",
+    "react-native-fs": "^2.20.0",
+    "react-native-zip-archive": "^6.1.0",
+    "typescript": "^5.3.0"
+  },
+  "files": [
+    "src/",
+    "ios/",
+    "android/",
+    "fast-issue-export.podspec",
+    "README.md"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "node",
+        "jsx": "react-native",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "declaration": true,
+        "declarationDir": "lib",
+        "outDir": "lib",
+        "rootDir": "src",
+        "baseUrl": ".",
+        "paths": {
+            "fast-issue-export": [
+                "./src/index"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "lib",
+        "example"
+    ]
+}
