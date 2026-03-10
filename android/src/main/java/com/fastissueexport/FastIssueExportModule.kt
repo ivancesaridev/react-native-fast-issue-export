@@ -260,16 +260,6 @@ class FastIssueExportModule(reactContext: ReactApplicationContext) :
 
     // ─── Event Helpers ──────────────────────────────────────────
 
-    @ReactMethod
-    fun addListener(eventName: String) {
-        // Required for NativeEventEmitter
-    }
-
-    @ReactMethod
-    fun removeListeners(count: Int) {
-        // Required for NativeEventEmitter
-    }
-
     private fun sendEvent(eventName: String, params: WritableMap?) {
         reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
