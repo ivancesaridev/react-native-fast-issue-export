@@ -186,41 +186,48 @@ async function performExport(): Promise<string> {
         const tempDir = `${RNFS.CachesDirectoryPath}/fast_issue_export_${Date.now()}`;
         await RNFS.mkdir(tempDir);
 
-        // 1. Save video clip from native buffer
-        const videoPath = await NativeModule.saveClip();
+        // Run data collection in parallel
+        await Promise.all([
+            // 1. Save video clip from native buffer
+            (async () => {
+                const videoPath = await NativeModule.saveClip();
+                const videoFileName = 'video.mp4';
+                const videoDest = `${tempDir}/${videoFileName}`;
+                await RNFS.copyFile(videoPath, videoDest);
+            })(),
+          
+            // Remove the original clip from the native buffer path to prevent storage exhaustion
+            await RNFS.unlink(videoPath).catch(() => { });
 
-        // Copy video into our temp directory
-        const videoFileName = 'video.mp4';
-        const videoDest = `${tempDir}/${videoFileName}`;
-        await RNFS.copyFile(videoPath, videoDest);
+            // 2. Collect device info
+            (async () => {
+                const deviceInfo = await NativeModule.getDeviceInfo();
+                const deviceInfoPath = `${tempDir}/device_info.json`;
+                await RNFS.writeFile(deviceInfoPath, JSON.stringify(deviceInfo, null, 2), 'utf8');
+            })(),
 
-        // Remove the original clip from the native buffer path to prevent storage exhaustion
-        await RNFS.unlink(videoPath).catch(() => { });
-
-        // 2. Collect device info
-        const deviceInfo = await NativeModule.getDeviceInfo();
-        const deviceInfoPath = `${tempDir}/device_info.json`;
-        await RNFS.writeFile(deviceInfoPath, JSON.stringify(deviceInfo, null, 2), 'utf8');
-
-        // 3. Collect custom app state (if callback provided)
-        if (config.getAppState) {
-            try {
-                const appState = await config.getAppState();
-                const appStatePath = `${tempDir}/app_state.json`;
-                await RNFS.writeFile(appStatePath, JSON.stringify(appState, null, 2), 'utf8');
-            } catch (err) {
-                // Write error info instead of crashing the whole export
-                const errorPath = `${tempDir}/app_state_error.json`;
-                await RNFS.writeFile(
-                    errorPath,
-                    JSON.stringify({
-                        error: 'Failed to collect app state',
-                        message: err instanceof Error ? err.message : String(err),
-                    }, null, 2),
-                    'utf8',
-                );
-            }
-        }
+            // 3. Collect custom app state (if callback provided)
+            (async () => {
+                if (config.getAppState) {
+                    try {
+                        const appState = await config.getAppState();
+                        const appStatePath = `${tempDir}/app_state.json`;
+                        await RNFS.writeFile(appStatePath, JSON.stringify(appState, null, 2), 'utf8');
+                    } catch (err) {
+                        // Write error info instead of crashing the whole export
+                        const errorPath = `${tempDir}/app_state_error.json`;
+                        await RNFS.writeFile(
+                            errorPath,
+                            JSON.stringify({
+                                error: 'Failed to collect app state',
+                                message: err instanceof Error ? err.message : String(err),
+                            }, null, 2),
+                            'utf8',
+                        );
+                    }
+                }
+            })(),
+        ]);
 
         // 4. Create ZIP archive
         const zipPath = `${RNFS.CachesDirectoryPath}/bug_report_${Date.now()}.zip`;
