@@ -194,6 +194,9 @@ async function performExport(): Promise<string> {
         const videoDest = `${tempDir}/${videoFileName}`;
         await RNFS.copyFile(videoPath, videoDest);
 
+        // Remove the original clip from the native buffer path to prevent storage exhaustion
+        await RNFS.unlink(videoPath).catch(() => { });
+
         // 2. Collect device info
         const deviceInfo = await NativeModule.getDeviceInfo();
         const deviceInfoPath = `${tempDir}/device_info.json`;
