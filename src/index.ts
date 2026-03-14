@@ -8,6 +8,7 @@
 import {
     NativeModules,
     NativeEventEmitter,
+    DeviceEventEmitter,
     Platform,
 } from 'react-native';
 import RNFS from 'react-native-fs';
@@ -75,7 +76,9 @@ if (!NativeModule) {
     );
 }
 
-const eventEmitter = new NativeEventEmitter(NativeModules.FastIssueExport);
+const eventEmitter = Platform.OS === 'ios'
+    ? new NativeEventEmitter(NativeModules.FastIssueExport)
+    : DeviceEventEmitter;
 
 // ─── State ──────────────────────────────────────────────────────
 
